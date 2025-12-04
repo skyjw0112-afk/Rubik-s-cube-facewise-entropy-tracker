@@ -1,0 +1,201 @@
+
+
+from magiccube import Cube
+from math import log2
+import matplotlib.pyplot as plt
+
+# ===== Common utilities =====
+
+def binary_entropy(p: float) -> float:
+    if p <= 0.0 or p >= 1.0:
+        return 0.0
+    return -p * log2(p) - (1 - p) * log2(1 - p)
+
+
+FACE_ORDER = ['U', 'R', 'F', 'D', 'L', 'B']
+
+
+def facelet_index(name: str) -> int:
+    face = name[0]
+    num = int(name[1:])
+    return FACE_ORDER.index(face) * 9 + (num - 1)
+
+
+corner_facelet_names = [
+    ('U9', 'R1', 'F3'),
+    ('U7', 'F1', 'L3'),
+    ('U1', 'L1', 'B3'),
+    ('U3', 'B1', 'R3'),
+    ('D3', 'F9', 'R7'),
+    ('D1', 'L9', 'F7'),
+    ('D7', 'B9', 'L7'),
+    ('D9', 'R9', 'B7'),
+]
+
+edge_facelet_names = [
+    ('U6', 'R2'),
+    ('U8', 'F2'),
+    ('U4', 'L2'),
+    ('U2', 'B2'),
+    ('D6', 'R8'),
+    ('D2', 'F8'),
+    ('D4', 'L8'),
+    ('D8', 'B8'),
+    ('F6', 'R4'),
+    ('F4', 'L6'),
+    ('B6', 'L4'),
+    ('B4', 'R6'),
+]
+
+corner_facelets = [[facelet_index(n) for n in triple] for triple in corner_facelet_names]
+edge_facelets = [[facelet_index(n) for n in pair] for pair in edge_facelet_names]
+
+corner_faces = [
+    ('U', 'R', 'F'),
+    ('U', 'F', 'L'),
+    ('U', 'L', 'B'),
+    ('U', 'B', 'R'),
+    ('D', 'F', 'R'),
+    ('D', 'L', 'F'),
+    ('D', 'B', 'L'),
+    ('D', 'R', 'B'),
+]
+
+edge_faces = [
+    ('U', 'R'),
+    ('U', 'F'),
+    ('U', 'L'),
+    ('U', 'B'),
+    ('D', 'R'),
+    ('D', 'F'),
+    ('D', 'L'),
+    ('D', 'B'),
+    ('F', 'R'),
+    ('F', 'L'),
+    ('B', 'L'),
+    ('B', 'R'),
+]
+
+
+def structural_entropy(cube: Cube,
+                       alpha: float = 1.0,
+                       beta: float = 1.0,
+                       gamma: float = 1.0,
+                       delta: float = 1.0) -> float:
+    """
+    Compute structural entropy H_cube based on
+    corner/edge position and orientation correctness.
+    """
+    k = cube.get_kociemba_facelet_colors()
+
+    centers = {}
+    for f in FACE_ORDER:
+        centers[f] = k[FACE_ORDER.index(f) * 9 + 4]
+
+    corner_pos_ok = 0
+    corner_ori_ok = 0
+    for faces, idxs in zip(corner_faces, corner_facelets):
+        cols = [k[i] for i in idxs]
+        exp = [centers[f] for f in faces]
+        if set(cols) == set(exp):
+            corner_pos_ok += 1
+        if cols == exp:
+            corner_ori_ok += 1
+
+    edge_pos_ok = 0
+    edge_ori_ok = 0
+    for faces, idxs in zip(edge_faces, edge_facelets):
+        cols = [k[i] for i in idxs]
+        exp = [centers[f] for f in faces]
+        if set(cols) == set(exp):
+            edge_pos_ok += 1
+        if cols == exp:
+            edge_ori_ok += 1
+
+    n_c, n_e = 8, 12
+    p_corner_pos = corner_pos_ok / n_c
+    p_corner_ori = corner_ori_ok / n_c
+    p_edge_pos = edge_pos_ok / n_e
+    p_edge_ori = edge_ori_ok / n_e
+
+    H_corner_pos = binary_entropy(p_corner_pos)
+    H_corner_ori = binary_entropy(p_corner_ori)
+    H_edge_pos = binary_entropy(p_edge_pos)
+    H_edge_ori = binary_entropy(p_edge_ori)
+
+    H_cube = (
+        alpha * H_corner_pos +
+        beta * H_corner_ori +
+        gamma * H_edge_pos +
+        delta * H_edge_ori
+    )
+
+    return H_cube
+
+
+def compute_increase_stats(values):
+    increase_count = 0
+    total_increase = 0.0
+    for a, b in zip(values, values[1:]):
+        if b > a:
+            increase_count += 1
+            total_increase += (b - a)
+    return increase_count, total_increase
+
+
+def track_Hcube(scramble: str, moves: str):
+    """
+    Apply scramble and then moves to a 3x3 cube,
+    returning final cube, list of H_cube values, and move count.
+    """
+    cube = Cube(3)
+
+    scramble = scramble.replace('’', "'").replace('‘', "'").replace('\n', ' ')
+    moves = moves.replace('’', "'").replace('‘', "'").replace('\n', ' ')
+
+    cube.rotate(scramble)
+
+    H_list = [structural_entropy(cube)]
+
+    for mv in moves.split():
+        cube.rotate(mv)
+        H_list.append(structural_entropy(cube))
+
+    return cube, H_list, len(moves.split())
+
+
+def plot_Hcube(H_list):
+    plt.figure(figsize=(10, 5))
+    plt.plot(H_list, marker='x')
+    plt.xlabel("Move step (0 = after scramble)")
+    plt.ylabel("Structural entropy H_cube (bits)")
+    plt.title("Evolution of structural entropy H_cube")
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
+
+
+# ===== Example usage =====
+if __name__ == "__main__":
+    # Example scramble and solution moves
+    scramble = "R U R' U'"
+    moves = "U R U' R'"
+
+    cube, H_cube_list, total_moves = track_Hcube(scramble, moves)
+
+    inc_cnt, inc_sum = compute_increase_stats(H_cube_list)
+    inc_ratio = inc_cnt / total_moves if total_moves > 0 else 0.0
+
+    print("----------------------------")
+    print("[H_cube increase statistics]")
+    print("Total moves:", total_moves)
+    print("Number of increases:", inc_cnt)
+    print("Total increase:", inc_sum)
+    print("Increase ratio (count / total moves):", inc_ratio)
+    print("----------------------------")
+
+    plot_Hcube(H_cube_list)
+
+
+
+
